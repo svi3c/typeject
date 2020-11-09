@@ -1,4 +1,4 @@
-import { Context, createInjector, toContext } from "./inject";
+import { createInjector, createModule, Module } from "./inject";
 import { VolatileMap } from "./volatile-map";
 
 const mockVolatileMap = ({
@@ -113,33 +113,62 @@ describe("toContext()", () => {
   it("should only apply the context type", () => {
     const definition = { a: () => ({}) };
 
-    const ctx: Context<{ a: {} }> = toContext(definition);
+    const ctx: Module<{ a: {} }> = createModule(definition);
 
     expect(definition).toBe(ctx);
   });
 });
 
 describe("Examples", () => {
-  describe("1", () => {
-    interface ServiceA {
-      useServiceB(): any;
-    }
-    interface ServiceB {
-      use(): any;
+  it("Example 1", () => {
+    // Types
+
+    interface IServiceA {
+      state: { foo: string };
+      use(): void;
     }
 
-    interface MyContext {
-      serviceA: ServiceA;
-      serviceB: ServiceB;
+    interface IServiceB {
+      useServiceA(): void;
     }
 
-    const injector = createInjector<MyContext>({
-      serviceA: (i) => ({ useServiceB: () => i("serviceB").use() }),
-      serviceB: () => ({ use: () => console.log("used") }),
+    // Implementation
+
+    class ServiceA implements IServiceA {
+      state = { foo: "bar" };
+      use(): void {
+        console.log(this.state.foo);
+      }
+    }
+
+    class ServiceB implements IServiceB {
+      constructor(private serviceA: IServiceA) {}
+      useServiceA() {
+        this.serviceA.use();
+      }
+    }
+
+    // Configuration
+
+    type InstancesA = { serviceA: IServiceA };
+
+    const moduleA = createModule<InstancesA>({
+      serviceA: [() => new ServiceA(), "s"],
     });
 
-    injector("serviceA").useServiceB();
+    type InstancesB = { serviceB: IServiceB };
 
-    expect(console.log).toHaveBeenCalledWith("used");
+    const moduleB = createModule<InstancesB | InstancesA>(
+      { serviceB: (i) => new ServiceB(i("serviceA")) },
+      moduleA
+    );
+
+    // Run
+
+    const injector = createInjector(moduleB);
+
+    injector("serviceB").useServiceA();
+
+    expect(console.log).toHaveBeenCalledWith("bar");
   });
 });

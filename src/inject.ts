@@ -1,25 +1,37 @@
 import { VolatileMap } from "./volatile-map";
 
+type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (
+  k: infer I
+) => void
+  ? I
+  : never;
+
 type Injector<T> = <K extends keyof T>(token: K) => T[K];
 
-type Factory<T, K extends keyof T> = (injector: Injector<Omit<T, K>>) => T[K];
-type Volatile<T, K extends keyof T> =
-  | Factory<T, K>
-  | [Factory<T, K>, "v" | "volatile" | void];
-type Prototype<T, K extends keyof T> = [Factory<T, K>, "p" | "prototype"];
-type Singleton<T, K extends keyof T> = [Factory<T, K>, "s" | "singleton"];
-type Provider<T, K extends keyof T> =
-  | Volatile<T, K>
-  | Prototype<T, K>
-  | Singleton<T, K>;
+type Factory<T, K extends keyof T, D = T> = (
+  injector: Injector<Omit<D, K>>
+) => T[K];
+type Volatile<T, K extends keyof T, D = T> =
+  | Factory<T, K, D>
+  | [Factory<T, K, D>, "v" | "volatile" | void];
+type Prototype<T, K extends keyof T, D = T> = [
+  Factory<T, K, D>,
+  "p" | "prototype"
+];
+type Singleton<T, K extends keyof T, D = T> = [
+  Factory<T, K, D>,
+  "s" | "singleton"
+];
+type Provider<T, K extends keyof T, D = T> =
+  | Volatile<T, K, D>
+  | Prototype<T, K, D>
+  | Singleton<T, K, D>;
 type OnlyObjects<T> = { [K in keyof T]: T[K] extends object ? T[K] : never };
-export type Context<T> = {
-  [K in keyof T]: Provider<T, K>;
+export type Module<T, D = T> = {
+  [K in keyof T]: Provider<T, K, D>;
 };
 
-export function createInjector<T extends OnlyObjects<T>>(
-  declaration: Context<T>
-) {
+export function createInjector<T extends OnlyObjects<T>>(module: Module<T>) {
   const prototypes = new Map<keyof T, any>();
   const singletonFactories = new Map<keyof T, any>();
   const volatileFactories = new Map<keyof T, any>();
@@ -29,8 +41,8 @@ export function createInjector<T extends OnlyObjects<T>>(
       ? new VolatileMap<keyof T, any>()
       : new Map<keyof T, any>();
   // tslint:disable-next-line: forin
-  for (const token in declaration) {
-    const provider = declaration[token];
+  for (const token in module) {
+    const provider = module[token];
     if (isVolatile(provider)) {
       volatileFactories.set(
         token,
@@ -84,5 +96,9 @@ const isVolatile = <T, K extends keyof T>(
 ): provider is Volatile<T, K> =>
   !Array.isArray(provider) || (provider as Prototype<T, K>)[1][0] === "v";
 
-export const toContext = <T extends OnlyObjects<T>>(context: Context<T>) =>
-  context;
+export function createModule<T>(
+  module: Module<T, UnionToIntersection<T>>,
+  ...modules: Array<Module<T, UnionToIntersection<T>>>
+): Module<UnionToIntersection<T>> {
+  return Object.assign(module, ...modules);
+}
