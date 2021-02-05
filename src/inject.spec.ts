@@ -1,11 +1,4 @@
-import {
-  createInjector,
-  createModule,
-  Module,
-  prototype,
-  singleton,
-  volatile,
-} from "./inject";
+import { Module } from "./inject";
 import { VolatileMap } from "./volatile-map";
 
 const mockVolatileMap = ({
@@ -24,34 +17,31 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-describe("createInjector()", () => {
-  it("should provide bound instances", () => {
-    const inject = createInjector<{ foo: {} }>({ foo: singleton(() => ({})) });
+describe("Module", () => {
+  describe("createInjector()", () => {
+    it("should provide bound instances", () => {
+      const value = {};
+      const inject = new Module().value("foo", value).createInjector();
 
-    expect(inject("foo")).toEqual({});
-  });
-
-  it("should pass the injector to the factories to retrieve dependencies", () => {
-    const inject = createInjector<{
-      foo: { foo: string };
-      bar: { bar: string };
-    }>({
-      foo: singleton(() => ({ foo: "bar" })),
-      bar: singleton((i) => ({ bar: i("foo").foo.replace("r", "z") })),
+      expect(inject("foo")).toEqual({});
     });
 
-    expect(inject("bar").bar).toEqual("baz");
+    it("should pass the injector to the factories to retrieve dependencies", () => {
+      const inject = new Module()
+        .singleton("foo", () => ({ foo: "bar" }))
+        .singleton("bar", (i) => ({ bar: i("foo").foo.replace("r", "z") }))
+        .createInjector();
+
+      expect(inject("bar").bar).toEqual("baz");
+    });
   });
 
   describe("volatiles", () => {
     it("should define volatiles", () => {
       const obj = {};
       const factory = jest.fn().mockImplementation(() => obj);
-      const inject = createInjector<{ a: {} }>({
-        a: volatile(factory),
-      });
-      mockVolatileMap.get.mockReturnValue(obj);
-      mockVolatileMap.has.mockReturnValueOnce(false).mockReturnValueOnce(true);
+      const inject = new Module().volatile("a", factory).createInjector();
+      mockVolatileMap.get.mockReturnValueOnce(null).mockReturnValueOnce(obj);
 
       const instance1 = inject("a");
       const instance2 = inject("a");
@@ -60,15 +50,13 @@ describe("createInjector()", () => {
       expect(instance1).toBe(instance2);
       expect(mockVolatileMap.set).toHaveBeenCalledWith("a", {});
       expect(mockVolatileMap.set).toHaveBeenCalledTimes(1);
-      expect(mockVolatileMap.get).toHaveBeenCalledTimes(1);
+      expect(mockVolatileMap.get).toHaveBeenCalledTimes(2);
       expect(factory).toHaveBeenCalledTimes(1);
     });
 
     it("should recreate volatile instances if garbage-collected", () => {
       const factory = jest.fn();
-      const inject = createInjector<{ a: {} }>({
-        a: volatile(factory),
-      });
+      const inject = new Module().volatile("a", factory).createInjector();
       mockVolatileMap.has.mockReturnValue(false);
 
       inject("a");
@@ -77,14 +65,36 @@ describe("createInjector()", () => {
       expect(mockVolatileMap.set).toHaveBeenCalledTimes(2);
       expect(factory).toHaveBeenCalledTimes(2);
     });
+
+    describe("no WeakRef", () => {
+      const WeakRef = (global as any).WeakRef;
+      let M: typeof Module;
+
+      beforeEach(() => {
+        delete (global as any).WeakRef;
+        jest.resetModules();
+        M = require("./inject").Module;
+      });
+      afterEach(() => ((global as any).WeakRef = WeakRef));
+
+      it("should fall back to singletons", () => {
+        const factory = jest.fn();
+        const inject = new M().volatile("a", factory).createInjector();
+        mockVolatileMap.has.mockReturnValue(false);
+
+        inject("a");
+        inject("a");
+
+        expect(mockVolatileMap.set).toHaveBeenCalledTimes(0);
+        expect(factory).toHaveBeenCalledTimes(1);
+      });
+    });
   });
 
   describe("singletons", () => {
     it("should define singletons", () => {
       const factory = jest.fn().mockImplementation(() => ({}));
-      const inject = createInjector<{ a: {} }>({
-        a: singleton(factory),
-      });
+      const inject = new Module().singleton("a", factory).createInjector();
 
       expect(inject("a")).toBe(inject("a"));
       expect(factory).toHaveBeenCalledTimes(1);
@@ -94,34 +104,25 @@ describe("createInjector()", () => {
   describe("prototypes", () => {
     it("should define prototypes", () => {
       const factory = jest.fn().mockImplementation(() => ({}));
-      const inject = createInjector<{ a: {} }>({
-        a: prototype(factory),
-      });
+      const inject = new Module().prototype("a", factory).createInjector();
 
       expect(inject("a")).not.toBe(inject("a"));
       expect(factory).toHaveBeenCalledTimes(2);
     });
   });
-});
 
-describe("createModule()", () => {
-  it("should return the same object, if only one module is passed in", () => {
-    const definition: Module<{ a: {} }> = { a: singleton(() => ({})) };
+  describe("add()", () => {
+    it("should merge passed modules into the new module", () => {
+      const m1 = new Module().value("a", 1).prototype("b", () => "b");
+      const m2 = new Module().singleton("a", () => 2).volatile("c", () => "c");
 
-    const ctx: Module<{ a: {} }> = createModule(definition);
+      const inject = new Module().add(m1, m2).value("d", "d").createInjector();
 
-    expect(definition).toBe(ctx);
-  });
-  it("should return a combined module object, if multiple modules are passed in", () => {
-    const definition1: Module<{ a: {} }> = { a: singleton(() => ({})) };
-    const definition2: Module<{ b: {} }> = { b: singleton(() => ({})) };
-
-    const ctx: Module<{ a: {}; b: {} }> = createModule<{ a: {} } | { b: {} }>(
-      definition1,
-      definition2
-    );
-
-    expect(definition1).toBe(ctx);
+      expect(inject("a")).toBe(2);
+      expect(inject("b")).toBe("b");
+      expect(inject("c")).toBe("c");
+      expect(inject("d")).toBe("d");
+    });
   });
 });
 
@@ -156,24 +157,20 @@ describe("Examples", () => {
 
     // Configuration
 
-    type InstancesA = { serviceA: IServiceA };
-
-    const moduleA = createModule<InstancesA>({
-      serviceA: volatile(() => new ServiceA()),
-    });
-
-    type InstancesB = { serviceB: IServiceB };
-
-    const moduleB = createModule<InstancesB | InstancesA>(
-      { serviceB: singleton((i) => new ServiceB(i("serviceA"))) },
-      moduleA
+    const moduleA = new Module().volatile(
+      "serviceA",
+      () => new ServiceA() as IServiceA
     );
+
+    const moduleB = new Module()
+      .add(moduleA)
+      .volatile("serviceB", (i) => new ServiceB(i("serviceA")) as IServiceB);
 
     // Run
 
-    const injector = createInjector(moduleB);
+    const inject = moduleB.createInjector();
 
-    injector("serviceB").useServiceA();
+    inject("serviceB").useServiceA();
 
     expect(console.log).toHaveBeenCalledWith("bar");
   });

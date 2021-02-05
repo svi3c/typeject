@@ -1,115 +1,103 @@
 import { VolatileMap } from "./volatile-map";
 
-type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (
-  k: infer I
-) => void
-  ? I
-  : never;
+type Factory<T, X> = (injector: Injector<T>) => X;
+type Key = string | number | symbol;
+type Factories<T> = Map<keyof T, Factory<any, T>>;
+type Injector<T> = <K extends keyof T>(k: K) => T[K];
 
-export type Injector<T> = <K extends keyof T>(token: K) => T[K];
+const volatileEnabled = typeof WeakRef === "function";
 
-type Factory<T, K extends keyof T, D = T> = (
-  injector: Injector<Omit<D, K>>
-) => T[K];
-type Volatile<T, K extends keyof T, D = T> = [
-  Factory<T, K, D>,
-  "v" | "volatile" | void
-];
-type Prototype<T, K extends keyof T, D = T> = [
-  Factory<T, K, D>,
-  "p" | "prototype"
-];
-type Singleton<T, K extends keyof T, D = T> = [
-  Factory<T, K, D>,
-  "s" | "singleton"
-];
-type Provider<T, K extends keyof T, D = T> =
-  | Volatile<T, K, D>
-  | Prototype<T, K, D>
-  | Singleton<T, K, D>;
+export class Module<T extends {} = {}> {
+  private _pF = new Map<keyof T, Factory<T, any>>();
+  private _sF = new Map<keyof T, Factory<T, any>>();
+  private _vF = new Map<keyof T, Factory<T, any>>();
 
-export type Module<T, D = T> = {
-  [K in keyof T]: Provider<T, K, D>;
-};
-
-export function createInjector<T>(module: Module<T>): Injector<T> {
-  const prototypes = new Map<keyof T, any>();
-  const singletonFactories = new Map<keyof T, any>();
-  const singletons = new Map<keyof T, any>();
-  const volatileFactories = new Map<keyof T, any>();
-  const volatiles =
-    typeof WeakRef === "function"
-      ? new VolatileMap<keyof T, any>()
-      : new Map<keyof T, any>();
-  // tslint:disable-next-line: forin
-  for (const token in module) {
-    const provider = module[token];
-    if (isVolatile(provider)) {
-      volatileFactories.set(token, provider[0]);
-    } else if (isSingleton(provider)) {
-      singletonFactories.set(token, provider[0]);
-    } else if (isPrototype(provider)) {
-      prototypes.set(token, provider[0]);
+  add<
+    T1 = {},
+    T2 = {},
+    T3 = {},
+    T4 = {},
+    T5 = {},
+    T6 = {},
+    T7 = {},
+    T8 = {},
+    T9 = {},
+    T10 = {}
+  >(
+    ...children: [
+      Module<T1>?,
+      Module<T2>?,
+      Module<T3>?,
+      Module<T4>?,
+      Module<T5>?,
+      Module<T6>?,
+      Module<T7>?,
+      Module<T8>?,
+      Module<T9>?,
+      Module<T10>?
+    ]
+  ): Module<T & T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 & T10> {
+    const mod = this as Module<any>;
+    for (const child of children) {
+      (child as Module<any>)._pF.forEach((v, k) => mod._pF.set(k, v));
+      (child as Module<any>)._sF.forEach((v, k) => mod._sF.set(k, v));
+      (child as Module<any>)._vF.forEach((v, k) => mod._vF.set(k, v));
     }
+    return mod;
   }
-  const injector = <K extends keyof T>(token: K): T[K] => {
-    if (volatiles.has(token)) {
-      return volatiles.get(token);
-    }
-    if (singletons.has(token)) {
-      return singletons.get(token);
-    }
-    if (volatileFactories.has(token)) {
-      const value = volatileFactories.get(token)(injector);
-      volatiles.set(token, value);
-      return value;
-    }
-    if (singletonFactories.has(token)) {
-      const value = singletonFactories.get(token)(injector);
-      singletons.set(token, value);
-      singletonFactories.delete(token);
-      return value;
-    }
-    if (prototypes.has(token)) {
-      return prototypes.get(token)();
-    }
-    throw Error(`Missing provider for '${token}'`);
-  };
+  value<K extends Key, X>(name: K, value: X) {
+    return this._add(this._sF, name, () => value);
+  }
+  prototype<K extends Key, X>(name: K, factory: Factory<T, X>) {
+    return this._add(this._pF, name, factory);
+  }
+  singleton<K extends Key, X>(name: K, factory: Factory<T, X>) {
+    return this._add(this._sF, name, factory);
+  }
+  volatile<K extends Key, X>(name: K, factory: Factory<T, X>) {
+    return this._add(volatileEnabled ? this._vF : this._sF, name, factory);
+  }
+  createInjector() {
+    return createInjector(this._pF, this._sF, this._vF);
+  }
+
+  private _add<K extends Key, X>(
+    factories: Map<keyof T, Factory<T, any>>,
+    name: K,
+    factory: Factory<T, X>
+  ) {
+    (factories as Map<K | keyof T, Factory<any, any>>).set(name, factory);
+    return (this as any) as Module<T & { [key in K]: X }>;
+  }
+}
+
+function createInjector<T extends {}>(
+  pF: Factories<T>,
+  sF: Factories<T>,
+  vF: Factories<T>
+): Injector<T> {
+  const sI = new Map<keyof T, any>();
+  const vI = new VolatileMap<keyof T, any>();
 
   return injector;
+
+  function injector<K extends keyof T>(name: K): T[K] {
+    return get(vF, name, vI) ?? get(sF, name, sI, true) ?? get(pF, name);
+  }
+
+  function get(
+    factories: Map<keyof T, Factory<T, any>>,
+    name: keyof T,
+    instances?: Map<keyof T, any> | VolatileMap<keyof T, any>,
+    removeFactory = false
+  ) {
+    let instance = instances?.get(name);
+    if (instance) return instance;
+    const factory = factories.get(name);
+    if (!factory) return null;
+    instance = factory(injector);
+    instances?.set(name, instance);
+    if (removeFactory) factories.delete(name);
+    return instance;
+  }
 }
-
-const isSingleton = <T, K extends keyof T>(
-  provider: Provider<T, K>
-): provider is Singleton<T, K> =>
-  Array.isArray(provider) && (provider as Singleton<T, K>)[1][0] === "s";
-
-const isPrototype = <T, K extends keyof T>(
-  provider: Provider<T, K>
-): provider is Prototype<T, K> =>
-  Array.isArray(provider) && (provider as Prototype<T, K>)[1][0] === "p";
-
-const isVolatile = <T, K extends keyof T>(
-  provider: Provider<T, K>
-): provider is Volatile<T, K> =>
-  Array.isArray(provider) && (provider as Prototype<T, K>)[1][0] === "v";
-
-export function createModule<T>(
-  module: Module<T, UnionToIntersection<T>>,
-  ...modules: Array<Module<T, UnionToIntersection<T>>>
-): Module<UnionToIntersection<T>> {
-  return Object.assign(module, ...modules);
-}
-
-export const singleton = <T, K extends keyof T, D = T>(
-  factory: Factory<T, K, D>
-): Singleton<T, K, D> => [factory, "s"];
-export const prototype = <T, K extends keyof T, D = T>(
-  factory: Factory<T, K, D>
-): Prototype<T, K, D> => [factory, "p"];
-export const volatile = <T, K extends keyof T, D = T>(
-  factory: Factory<T, K, D>
-): Volatile<T, K, D> => [factory, "v"];
-export const s = singleton;
-export const p = prototype;
-export const v = volatile;
