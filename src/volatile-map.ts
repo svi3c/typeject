@@ -7,9 +7,6 @@ export class VolatileMap<K, V extends {}> {
     return this;
   }
   get(k: K) {
-    return this.map.get(k)?.deref();
-  }
-  has(k: K) {
-    return this.get(k) !== undefined;
+    return this.map.get(k)?.deref() ?? null;
   }
 }

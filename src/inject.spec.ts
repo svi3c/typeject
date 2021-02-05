@@ -37,50 +37,61 @@ describe("Module", () => {
   });
 
   describe("volatiles", () => {
-    it("should define volatiles", () => {
-      const obj = {};
-      const factory = jest.fn().mockImplementation(() => obj);
-      const inject = new Module().volatile("a", factory).createInjector();
-      mockVolatileMap.get.mockReturnValueOnce(null).mockReturnValueOnce(obj);
+    const WeakRef = (global as any).WeakRef;
+    let M: typeof Module;
 
-      const instance1 = inject("a");
-      const instance2 = inject("a");
+    describe("with WeakRef", () => {
+      beforeEach(() => {
+        (global as any).WeakRef = jest.fn();
+        jest.resetModules();
+        M = require("./inject").Module;
+      });
 
-      expect(instance1).toBe(obj);
-      expect(instance1).toBe(instance2);
-      expect(mockVolatileMap.set).toHaveBeenCalledWith("a", {});
-      expect(mockVolatileMap.set).toHaveBeenCalledTimes(1);
-      expect(mockVolatileMap.get).toHaveBeenCalledTimes(2);
-      expect(factory).toHaveBeenCalledTimes(1);
-    });
+      afterEach(() => ((global as any).WeakRef = WeakRef));
 
-    it("should recreate volatile instances if garbage-collected", () => {
-      const factory = jest.fn();
-      const inject = new Module().volatile("a", factory).createInjector();
-      mockVolatileMap.has.mockReturnValue(false);
+      it("should define volatiles", () => {
+        const obj = {};
+        const factory = jest.fn().mockImplementation(() => obj);
+        const inject = new M().volatile("a", factory).createInjector();
+        mockVolatileMap.get.mockReturnValueOnce(null).mockReturnValueOnce(obj);
 
-      inject("a");
-      inject("a");
+        const instance1 = inject("a");
+        const instance2 = inject("a");
 
-      expect(mockVolatileMap.set).toHaveBeenCalledTimes(2);
-      expect(factory).toHaveBeenCalledTimes(2);
+        expect(instance1).toBe(obj);
+        expect(instance1).toBe(instance2);
+        expect(mockVolatileMap.set).toHaveBeenCalledWith("a", {});
+        expect(mockVolatileMap.set).toHaveBeenCalledTimes(1);
+        expect(mockVolatileMap.get).toHaveBeenCalledTimes(2);
+        expect(factory).toHaveBeenCalledTimes(1);
+      });
+
+      it("should recreate volatile instances if garbage-collected", () => {
+        const factory = jest.fn();
+        const inject = new M().volatile("a", factory).createInjector();
+        // mockVolatileMap.has.mockReturnValue(false);
+
+        inject("a");
+        inject("a");
+
+        expect(mockVolatileMap.set).toHaveBeenCalledTimes(2);
+        expect(factory).toHaveBeenCalledTimes(2);
+      });
     });
 
     describe("no WeakRef", () => {
-      const WeakRef = (global as any).WeakRef;
-      let M: typeof Module;
-
       beforeEach(() => {
         delete (global as any).WeakRef;
         jest.resetModules();
         M = require("./inject").Module;
       });
+
       afterEach(() => ((global as any).WeakRef = WeakRef));
 
       it("should fall back to singletons", () => {
         const factory = jest.fn();
         const inject = new M().volatile("a", factory).createInjector();
-        mockVolatileMap.has.mockReturnValue(false);
+        // mockVolatileMap.has.mockReturnValue(false);
 
         inject("a");
         inject("a");
