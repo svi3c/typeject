@@ -2,6 +2,8 @@
 
 Simple, typesafe and unobstrusive dependency injection
 
+[![Build Status](https://travis-ci.com/svi3c/typeject.svg?branch=main)](https://travis-ci.com/svi3c/typeject)
+
 ## Why another dependency injection library for TypeScript?
 
 I was looking for a dependency injection framework that fulfills those criterias:
