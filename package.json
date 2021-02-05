@@ -1,6 +1,6 @@
 {
   "name": "typeject",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Simple, typesafe and unobstrusive dependency injection",
   "main": "dist/inject.js",
   "types": "dist/inject.d.ts",
