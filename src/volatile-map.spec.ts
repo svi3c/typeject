@@ -28,43 +28,18 @@ describe("VolatileMap", () => {
       expect(map.get(123)).toBe(obj);
     });
 
-    it("should return undefined, if there is no entry", () => {
+    it("should return null, if there is no entry", () => {
       const map = new VolatileMap<number, {}>();
 
-      expect(map.get(123)).toBeUndefined();
+      expect(map.get(123)).toBeNull();
     });
 
-    it("should return undefined, if the entry is not hold by the WeakRef", () => {
+    it("should return null, if the entry is not hold by the WeakRef", () => {
       const obj = {};
       const map = new VolatileMap<number, {}>();
       map.set(123, obj);
 
-      expect(map.get(123)).toBeUndefined();
-    });
-  });
-
-  describe("has()", () => {
-    it("should return true, if a found WeakRef holds a value", () => {
-      const obj = {};
-      const map = new VolatileMap<number, {}>();
-      map.set(123, obj);
-      mockRef.deref.mockReturnValue(obj);
-
-      expect(map.has(123)).toBe(true);
-    });
-
-    it("should return false, if there is no entry", () => {
-      const map = new VolatileMap<number, {}>();
-
-      expect(map.has(123)).toBe(false);
-    });
-
-    it("should return false, if the entry is not hold by the WeakRef", () => {
-      const obj = {};
-      const map = new VolatileMap<number, {}>();
-      map.set(123, obj);
-
-      expect(map.has(123)).toBe(false);
+      expect(map.get(123)).toBeNull();
     });
   });
 });

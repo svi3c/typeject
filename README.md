@@ -2,6 +2,8 @@
 
 Simple, typesafe and unobstrusive dependency injection
 
+[![Build Status](https://travis-ci.com/svi3c/typeject.svg?branch=main)](https://travis-ci.com/svi3c/typeject)
+
 ## Why another dependency injection library for TypeScript?
 
 I was looking for a dependency injection framework that fulfills those criterias:
@@ -65,57 +67,60 @@ class ServiceB implements IServiceB {
   }
 }
 
-// Configuration (for two modules)
+// Configuration
 
-type InstancesA = { serviceA: IServiceA };
-
-const moduleA = createModule<InstancesA>({
-  serviceA: volatile(() => new ServiceA()),
-});
-
-type InstancesB = { serviceB: IServiceB };
-
-const moduleB = createModule<InstancesB | InstancesA>(
-  { serviceB: singleton((i) => new ServiceB(i("serviceA"))) },
-  moduleA
+const moduleA = new Module().volatile(
+  "serviceA",
+  () => new ServiceA() as IServiceA
 );
+
+const moduleB = new Module()
+  .add(moduleA)
+  .volatile("serviceB", (i) => new ServiceB(i("serviceA")) as IServiceB);
 
 // Run
 
-const injector = createInjector(moduleB);
+const inject = moduleB.createInjector();
 
-injector("serviceB").useServiceA();
-
-expect(console.log).toHaveBeenCalledWith("bar");
+inject("serviceB").useServiceA();
 ```
 
 ## API
 
-`createInjector<T>(module: Module<T>): Injector<T>`
+`new Module(): Module`
+
+Creates a new module.
+
+`Module.prototype.createInjector(): Injector`
 
 Creates an injector from a given module.
 
-`type Injector<T> = <K extends keyof T>(token: K) => T[K]`
+`Module.prototype.add(...modules): Module`
 
-Is used to instantiate and get instances from the module.
+Is used add modules to this module instance. This is an in-place operation.
 
-`createModule<T>(...modules: Module<T, UnionToIntersection<T>>): Module<UnionToIntersection<T>>`
+`Module.prototype.value(name: string | number | symbol, value): Module`
 
-Is used to create a module from one or multiple modules. A module is simply an object, mapping tokens to providers.
+Short form of Module.prototype.singleton with an already present value.
 
-`singleton<T, K extends keyof T, D = T>(factory: Factory<T, K, D>): Singleton<T, K, D>`
+`Module.prototype.singleton(name: string | number | symbol, factory: Factory): Module`
 
-Is used to create a singleton provider from the context.
-Don't panic about this generic. If you use this function within a module definition, type inference will help you out (see example).
+Adds a singleton provider to the module instance (in-place).
 
-`prototype<T, K extends keyof T, D = T>(factory: Factory<T, K, D>): Prototype<T, K, D>`
+`Module.prototype.prototype(name: string | number | symbol, factory: Factory): Module`
 
-Is used to create a prototype provider from the context.
+Adds a prototype provider to the module instance (in-place).
 
-`volatile<T, K extends keyof T, D = T>(factory: Factory<T, K, D>): Volatile<T, K, D>`
+`Module.prototype.volatile(name: string | number | symbol, factory: Factory): Module`
 
-Is used to create a volatile provider from the context.
+Adds a volatile provider to the module instance (in-place).
 
-`type Factory<T, K extends keyof T, D = T> = (injector: Injector<Omit<D, K>>) => T[K];`
+`function Injector(name): value`
 
-The factory is part of the providers. It passes you an injector which allows you to inject random dependencies from your module.
+Is used to instantiate and get instances from the module. It holds the instances of the registered
+providers. This way multiple independent injectors can be created fron a module.
+
+`function Factory(injector): value`
+
+The factory is part of the providers. It gets lazily called with the injector instance as parameter, so
+you can make use of already defined dependencies in the module.
