@@ -76,13 +76,13 @@ const moduleA = new Module().volatile(
 
 const moduleB = new Module()
   .add(moduleA)
-  .volatile("serviceB", (i) => new ServiceB(i("serviceA")) as IServiceB);
+  .volatile("serviceB", (i) => new ServiceB(i.serviceA()) as IServiceB);
 
 // Run
 
-const inject = moduleB.createInjector();
+const inject = moduleB.injector;
 
-inject("serviceB").useServiceA();
+inject.serviceB().useServiceA();
 ```
 
 ## API
@@ -91,7 +91,7 @@ inject("serviceB").useServiceA();
 
 Creates a new module.
 
-`Module.prototype.createInjector(): Injector`
+`Module.prototype.injector(): Injector`
 
 Creates an injector from a given module.
 
