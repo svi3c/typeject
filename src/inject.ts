@@ -1,16 +1,9 @@
-import { VolatileMap } from "./volatile-map";
-
-type Factory<T, X> = (injector: Injector<T>) => X;
 type Key = string | number | symbol;
-type Factories<T> = Map<keyof T, Factory<any, T>>;
-type Injector<T> = <K extends keyof T>(k: K) => T[K];
-
-const volatileEnabled = typeof WeakRef === "function";
+type Factory<T, X> = (injector: Injector<T>) => X;
+type Injector<T> = { [K in keyof T]: () => T[K] };
 
 export class Module<T extends {} = {}> {
-  private _pF = new Map<keyof T, Factory<T, any>>();
-  private _sF = new Map<keyof T, Factory<T, any>>();
-  private _vF = new Map<keyof T, Factory<T, any>>();
+  readonly injector = {} as Injector<T>;
 
   add<
     T1 = {},
@@ -24,7 +17,7 @@ export class Module<T extends {} = {}> {
     T9 = {},
     T10 = {}
   >(
-    ...children: [
+    ...deps: [
       Module<T1>?,
       Module<T2>?,
       Module<T3>?,
@@ -37,67 +30,42 @@ export class Module<T extends {} = {}> {
       Module<T10>?
     ]
   ): Module<T & T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 & T10> {
-    const mod = this as Module<any>;
-    for (const child of children) {
-      (child as Module<any>)._pF.forEach((v, k) => mod._pF.set(k, v));
-      (child as Module<any>)._sF.forEach((v, k) => mod._sF.set(k, v));
-      (child as Module<any>)._vF.forEach((v, k) => mod._vF.set(k, v));
-    }
-    return mod;
+    Object.assign(this.injector, ...deps.map((dep) => dep!.injector));
+    return this as Module<any>;
   }
   value<K extends Key, X>(name: K, value: X) {
-    return this._add(this._sF, name, () => value);
+    return this._add(name, () => value);
   }
   prototype<K extends Key, X>(name: K, factory: Factory<T, X>) {
-    return this._add(this._pF, name, factory);
+    return this._add(name, () => factory(this.injector));
   }
   singleton<K extends Key, X>(name: K, factory: Factory<T, X>) {
-    return this._add(this._sF, name, factory);
+    return this._add(name, () => {
+      const instance = factory(this.injector);
+      this.value(name, instance);
+      return instance;
+    });
   }
-  volatile<K extends Key, X>(name: K, factory: Factory<T, X>) {
-    return this._add(volatileEnabled ? this._vF : this._sF, name, factory);
-  }
-  createInjector() {
-    return createInjector(this._pF, this._sF, this._vF);
-  }
-
-  private _add<K extends Key, X>(
-    factories: Map<keyof T, Factory<T, any>>,
+  volatile<K extends Key, X>(
     name: K,
     factory: Factory<T, X>
-  ) {
-    (factories as Map<K | keyof T, Factory<any, any>>).set(name, factory);
+  ): Module<T & { [key in K]: X }> {
+    if (typeof WeakRef === "function") {
+      let ref: WeakRef<X>;
+      return this._add(name, () => {
+        let instance = ref?.deref();
+        if (instance === undefined) {
+          instance = factory(this.injector);
+          ref = new WeakRef(instance);
+        }
+        return instance;
+      });
+    }
+    return this.singleton(name, factory);
+  }
+
+  private _add<K extends Key, X>(name: K, accessor: () => X) {
+    (this.injector as any)[name] = accessor;
     return (this as any) as Module<T & { [key in K]: X }>;
-  }
-}
-
-function createInjector<T extends {}>(
-  pF: Factories<T>,
-  sF: Factories<T>,
-  vF: Factories<T>
-): Injector<T> {
-  const sI = new Map<keyof T, any>();
-  const vI = new VolatileMap<keyof T, any>();
-
-  return injector;
-
-  function injector<K extends keyof T>(name: K): T[K] {
-    return get(vF, name, vI) ?? get(sF, name, sI, true) ?? get(pF, name);
-  }
-
-  function get(
-    factories: Map<keyof T, Factory<T, any>>,
-    name: keyof T,
-    instances?: Map<keyof T, any> | VolatileMap<keyof T, any>,
-    removeFactory = false
-  ) {
-    let instance = instances?.get(name);
-    if (instance) return instance;
-    const factory = factories.get(name);
-    if (!factory) return null;
-    instance = factory(injector);
-    instances?.set(name, instance);
-    if (removeFactory) factories.delete(name);
-    return instance;
   }
 }

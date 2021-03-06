@@ -1,80 +1,62 @@
 import { Module } from "./inject";
-import { VolatileMap } from "./volatile-map";
-
-const mockVolatileMap = ({
-  has: jest.fn(),
-  set: jest.fn(),
-  get: jest.fn(),
-} as Partial<VolatileMap<string, {}>>) as jest.Mocked<VolatileMap<string, {}>>;
-
-jest.mock("./volatile-map.ts", () => ({
-  VolatileMap: jest.fn().mockImplementation(() => mockVolatileMap),
-}));
 
 const console = { log: jest.fn() };
 
+const mockWeakRef = { deref: jest.fn() };
+let MockWeakRef = jest.fn(() => mockWeakRef);
+
 beforeEach(() => {
   jest.clearAllMocks();
+  (global as any).WeakRef = MockWeakRef;
 });
 
 describe("Module", () => {
-  describe("createInjector()", () => {
+  describe("injector", () => {
     it("should provide bound instances", () => {
       const value = {};
-      const inject = new Module().value("foo", value).createInjector();
+      const inject = new Module().value("foo", value).injector;
 
-      expect(inject("foo")).toEqual({});
+      expect(inject.foo()).toEqual({});
     });
 
     it("should pass the injector to the factories to retrieve dependencies", () => {
       const inject = new Module()
         .singleton("foo", () => ({ foo: "bar" }))
-        .singleton("bar", (i) => ({ bar: i("foo").foo.replace("r", "z") }))
-        .createInjector();
+        .singleton("bar", (i) => ({ bar: i.foo().foo.replace("r", "z") }))
+        .injector;
 
-      expect(inject("bar").bar).toEqual("baz");
+      expect(inject.bar().bar).toEqual("baz");
     });
   });
 
   describe("volatiles", () => {
     const WeakRef = (global as any).WeakRef;
-    let M: typeof Module;
 
     describe("with WeakRef", () => {
-      beforeEach(() => {
-        (global as any).WeakRef = jest.fn();
-        jest.resetModules();
-        M = require("./inject").Module;
-      });
-
-      afterEach(() => ((global as any).WeakRef = WeakRef));
-
       it("should define volatiles", () => {
         const obj = {};
         const factory = jest.fn().mockImplementation(() => obj);
-        const inject = new M().volatile("a", factory).createInjector();
-        mockVolatileMap.get.mockReturnValueOnce(null).mockReturnValueOnce(obj);
+        const inject = new Module().volatile("a", factory).injector;
+        mockWeakRef.deref.mockReturnValueOnce(obj);
 
-        const instance1 = inject("a");
-        const instance2 = inject("a");
+        const instance1 = inject.a();
+        const instance2 = inject.a();
 
         expect(instance1).toBe(obj);
         expect(instance1).toBe(instance2);
-        expect(mockVolatileMap.set).toHaveBeenCalledWith("a", {});
-        expect(mockVolatileMap.set).toHaveBeenCalledTimes(1);
-        expect(mockVolatileMap.get).toHaveBeenCalledTimes(2);
+        expect(MockWeakRef).toHaveBeenCalledWith({});
+        expect(MockWeakRef).toHaveBeenCalledTimes(1);
         expect(factory).toHaveBeenCalledTimes(1);
       });
 
       it("should recreate volatile instances if garbage-collected", () => {
         const factory = jest.fn();
-        const inject = new M().volatile("a", factory).createInjector();
-        // mockVolatileMap.has.mockReturnValue(false);
+        const inject = new Module().volatile("a", factory).injector;
 
-        inject("a");
-        inject("a");
+        inject.a();
+        inject.a();
 
-        expect(mockVolatileMap.set).toHaveBeenCalledTimes(2);
+        expect(MockWeakRef).toHaveBeenCalledTimes(2);
         expect(factory).toHaveBeenCalledTimes(2);
       });
     });
@@ -82,21 +64,16 @@ describe("Module", () => {
     describe("no WeakRef", () => {
       beforeEach(() => {
         delete (global as any).WeakRef;
-        jest.resetModules();
-        M = require("./inject").Module;
       });
 
-      afterEach(() => ((global as any).WeakRef = WeakRef));
-
       it("should fall back to singletons", () => {
-        const factory = jest.fn();
-        const inject = new M().volatile("a", factory).createInjector();
-        // mockVolatileMap.has.mockReturnValue(false);
+        const factory = jest.fn(() => ({}));
+        const inject = new Module().volatile("a", factory).injector;
 
-        inject("a");
-        inject("a");
+        inject.a();
+        inject.a();
 
-        expect(mockVolatileMap.set).toHaveBeenCalledTimes(0);
+        expect(MockWeakRef).not.toHaveBeenCalled();
         expect(factory).toHaveBeenCalledTimes(1);
       });
     });
@@ -105,9 +82,9 @@ describe("Module", () => {
   describe("singletons", () => {
     it("should define singletons", () => {
       const factory = jest.fn().mockImplementation(() => ({}));
-      const inject = new Module().singleton("a", factory).createInjector();
+      const inject = new Module().singleton("a", factory).injector;
 
-      expect(inject("a")).toBe(inject("a"));
+      expect(inject.a()).toBe(inject.a());
       expect(factory).toHaveBeenCalledTimes(1);
     });
   });
@@ -115,9 +92,9 @@ describe("Module", () => {
   describe("prototypes", () => {
     it("should define prototypes", () => {
       const factory = jest.fn().mockImplementation(() => ({}));
-      const inject = new Module().prototype("a", factory).createInjector();
+      const inject = new Module().prototype("a", factory).injector;
 
-      expect(inject("a")).not.toBe(inject("a"));
+      expect(inject.a()).not.toBe(inject.a());
       expect(factory).toHaveBeenCalledTimes(2);
     });
   });
@@ -127,12 +104,12 @@ describe("Module", () => {
       const m1 = new Module().value("a", 1).prototype("b", () => "b");
       const m2 = new Module().singleton("a", () => 2).volatile("c", () => "c");
 
-      const inject = new Module().add(m1, m2).value("d", "d").createInjector();
+      const inject = new Module().add(m1, m2).value("d", "d").injector;
 
-      expect(inject("a")).toBe(2);
-      expect(inject("b")).toBe("b");
-      expect(inject("c")).toBe("c");
-      expect(inject("d")).toBe("d");
+      expect(inject.a()).toBe(2);
+      expect(inject.b()).toBe("b");
+      expect(inject.c()).toBe("c");
+      expect(inject.d()).toBe("d");
     });
   });
 });
@@ -175,13 +152,13 @@ describe("Examples", () => {
 
     const moduleB = new Module()
       .add(moduleA)
-      .volatile("serviceB", (i) => new ServiceB(i("serviceA")) as IServiceB);
+      .volatile("serviceB", (i) => new ServiceB(i.serviceA()) as IServiceB);
 
     // Run
 
-    const inject = moduleB.createInjector();
+    const inject = moduleB.injector;
 
-    inject("serviceB").useServiceA();
+    inject.serviceB().useServiceA();
 
     expect(console.log).toHaveBeenCalledWith("bar");
   });
