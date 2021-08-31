@@ -1,4 +1,4 @@
-import { Module } from "./inject";
+import { prototype, singleton, volatile } from "./inject";
 
 const console = { log: jest.fn() };
 
@@ -10,107 +10,69 @@ beforeEach(() => {
   (global as any).WeakRef = MockWeakRef;
 });
 
-describe("Module", () => {
-  describe("injector", () => {
-    it("should provide bound instances", () => {
-      const value = {};
-      const inject = new Module().value("foo", value).injector;
+describe("volatile()", () => {
+  describe("with WeakRef", () => {
+    it("should define volatiles", () => {
+      const obj = {};
+      const factory = jest.fn(() => obj);
+      const v = volatile(factory);
+      mockWeakRef.deref.mockReturnValueOnce(obj).mockReturnValueOnce(obj);
 
-      expect(inject.foo()).toEqual({});
-    });
-
-    it("should pass the injector to the factories to retrieve dependencies", () => {
-      const inject = new Module()
-        .singleton("foo", () => ({ foo: "bar" }))
-        .singleton("bar", (i) => ({ bar: i.foo().foo.replace("r", "z") }))
-        .injector;
-
-      expect(inject.bar().bar).toEqual("baz");
-    });
-  });
-
-  describe("volatiles", () => {
-    const WeakRef = (global as any).WeakRef;
-
-    describe("with WeakRef", () => {
-      it("should define volatiles", () => {
-        const obj = {};
-        const factory = jest.fn().mockImplementation(() => obj);
-        const inject = new Module().volatile("a", factory).injector;
-        mockWeakRef.deref.mockReturnValueOnce(obj);
-
-        const instance1 = inject.a();
-        const instance2 = inject.a();
-
-        expect(instance1).toBe(obj);
-        expect(instance1).toBe(instance2);
-        expect(MockWeakRef).toHaveBeenCalledWith({});
-        expect(MockWeakRef).toHaveBeenCalledTimes(1);
-        expect(factory).toHaveBeenCalledTimes(1);
-      });
-
-      it("should recreate volatile instances if garbage-collected", () => {
-        const factory = jest.fn();
-        const inject = new Module().volatile("a", factory).injector;
-
-        inject.a();
-        inject.a();
-
-        expect(MockWeakRef).toHaveBeenCalledTimes(2);
-        expect(factory).toHaveBeenCalledTimes(2);
-      });
-    });
-
-    describe("no WeakRef", () => {
-      beforeEach(() => {
-        delete (global as any).WeakRef;
-      });
-
-      it("should fall back to singletons", () => {
-        const factory = jest.fn(() => ({}));
-        const inject = new Module().volatile("a", factory).injector;
-
-        inject.a();
-        inject.a();
-
-        expect(MockWeakRef).not.toHaveBeenCalled();
-        expect(factory).toHaveBeenCalledTimes(1);
-      });
-    });
-  });
-
-  describe("singletons", () => {
-    it("should define singletons", () => {
-      const factory = jest.fn().mockImplementation(() => ({}));
-      const inject = new Module().singleton("a", factory).injector;
-
-      expect(inject.a()).toBe(inject.a());
+      expect(v()).toBe(obj);
+      expect(v()).toBe(v());
+      expect(MockWeakRef).toHaveBeenCalledWith({});
+      expect(MockWeakRef).toHaveBeenCalledTimes(1);
       expect(factory).toHaveBeenCalledTimes(1);
     });
-  });
 
-  describe("prototypes", () => {
-    it("should define prototypes", () => {
-      const factory = jest.fn().mockImplementation(() => ({}));
-      const inject = new Module().prototype("a", factory).injector;
+    it("should recreate volatile instances if garbage-collected", () => {
+      const factory = jest.fn();
+      const v = volatile(factory);
+      mockWeakRef.deref.mockReturnValueOnce(undefined);
 
-      expect(inject.a()).not.toBe(inject.a());
+      v();
+      v();
+
+      expect(MockWeakRef).toHaveBeenCalledTimes(2);
       expect(factory).toHaveBeenCalledTimes(2);
     });
   });
 
-  describe("add()", () => {
-    it("should merge passed modules into the new module", () => {
-      const m1 = new Module().value("a", 1).prototype("b", () => "b");
-      const m2 = new Module().singleton("a", () => 2).volatile("c", () => "c");
-
-      const inject = new Module().add(m1, m2).value("d", "d").injector;
-
-      expect(inject.a()).toBe(2);
-      expect(inject.b()).toBe("b");
-      expect(inject.c()).toBe("c");
-      expect(inject.d()).toBe("d");
+  describe("no WeakRef", () => {
+    beforeEach(() => {
+      delete (global as any).WeakRef;
     });
+
+    it("should fall back to singletons", () => {
+      const factory = jest.fn(() => ({}));
+      const v = volatile(factory);
+
+      v();
+      v();
+
+      expect(MockWeakRef).not.toHaveBeenCalled();
+      expect(factory).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe("singleton()", () => {
+  it("should define singletons", () => {
+    const factory = jest.fn(() => ({}));
+    const s = singleton(factory);
+
+    expect(s()).toBe(s());
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("prototype()", () => {
+  it("should define singletons", () => {
+    const factory = jest.fn(() => ({}));
+    const p = prototype(factory);
+
+    expect(p()).not.toBe(p());
+    expect(factory).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -145,20 +107,13 @@ describe("Examples", () => {
 
     // Configuration
 
-    const moduleA = new Module().volatile(
-      "serviceA",
-      () => new ServiceA() as IServiceA
-    );
+    const serviceA = volatile<IServiceA>(() => new ServiceA());
 
-    const moduleB = new Module()
-      .add(moduleA)
-      .volatile("serviceB", (i) => new ServiceB(i.serviceA()) as IServiceB);
+    const serviceB = volatile<IServiceB>(() => new ServiceB(serviceA()));
 
     // Run
 
-    const inject = moduleB.injector;
-
-    inject.serviceB().useServiceA();
+    serviceB().useServiceA();
 
     expect(console.log).toHaveBeenCalledWith("bar");
   });
